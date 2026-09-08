@@ -119,6 +119,40 @@ Once running, the browser lets you: upload materials, inspect converted Markdown
   <sub>A local-first knowledge retrieval workspace combining graph, vector, hybrid retrieval and LLM answers.</sub>
 </p>
 
+#### Knowledge-document preview and rendering
+
+The Web preview renders the normalized Markdown that is actually used by Graph/RAG, rather than sending PDF, Office or other binary files directly to the browser. It uses `react-markdown`, GFM, KaTeX and a Mermaid renderer loaded on demand. Supported features include:
+
+- headings, bold, italic, strikethrough, nested lists, task lists, block quotes, thematic breaks, tables, footnotes, links, images and fenced code;
+- inline math such as `$a^2+b^2=c^2$` and display math with `$$...$$`;
+- common LaTeX wrappers `\(...\)` and `\[...\]`, plus `aligned`, `cases`, matrices, fractions, integrals, sums, limits, Chinese `\text{}` and `\xrightarrow{}`;
+- language-aware code highlighting;
+- Mermaid fenced blocks, for example:
+
+  ````markdown
+  ```mermaid
+  flowchart TD
+      A[Source] --> B[Markdown]
+      B --> C[Knowledge graph]
+      B --> D[RAG vectors]
+  ```
+  ````
+
+- Obsidian-style links: `[[Data structures]]` and `[[Data structures|open the concept]]`;
+- Obsidian-style callouts:
+
+  ```markdown
+  > [!NOTE] Note
+  > This body is rendered as a themed information panel.
+  ```
+
+- safe placeholder rendering for `![[document or image]]` embeds;
+- YAML/TOML frontmatter recognition, hidden from the normal reading flow.
+
+Math is rendered with KaTeX. Wide matrices and long formulas scroll inside the document preview instead of breaking the surrounding card. Mermaid is dynamically loaded only when a document contains a diagram, so ordinary documents do not pay the chart-engine startup cost.
+
+Raw HTML and `<script>` are intentionally not executed, preventing imported documents from becoming script-injection surfaces. Web pages, video, audio, OCR and remote links should still be normalized by the upstream agent before they reach kemo-graph. Unsupported custom KaTeX macros are kept as source with a localized error indicator; they do not blank the whole document.
+
 ### Command line
 
 ```powershell

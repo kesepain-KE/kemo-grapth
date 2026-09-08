@@ -565,6 +565,18 @@ Content-Type: application/json
 
 保存成功后只原子替换 Markdown、重算 `content_hash`，并把 `graph_status` 与 `rag_status` 设为 `pending`。旧 `graph_hash`、`rag_hash`、图谱和向量继续保留，直到调用 `/jobs/ingest` 或 `/ingest` 成功完成先准备后替换。保存本身不调用模型。
 
+### 5.2.2 网页预览的知识文档渲染范围
+
+`content` 字段始终返回规范 Markdown 原文；HTTP API 不把它转换成 HTML。网页端在本地完成安全渲染，当前支持：
+
+- CommonMark 与 GFM：标题、列表、任务列表、引用、水平分隔线、表格、脚注、删除线、链接、图片和代码块；
+- KaTeX 数学公式：`$...$`、`$$...$$`、`\(...\)`、`\[...\]`，以及 `aligned`、`cases`、矩阵、分数、积分、求和、极限和 `\xrightarrow{}` 等常见结构；
+- Mermaid 图表 fenced block，按需加载；
+- Obsidian 双链 `[[节点]]`、别名双链 `[[节点|显示名]]`、Callout `> [!NOTE]` 和 `![[嵌入]]` 安全占位；
+- YAML/TOML frontmatter 识别与代码语言高亮。
+
+网页预览默认不执行原始 HTML、`<script>` 或任意导入文档脚本。KaTeX 或 Mermaid 语法错误只影响当前公式/图表，并保留原始文本，不会让整个文档预览失败。API 调用方若不使用网页端，应将 `content` 交给自己的 Markdown/数学渲染器；不要把 `content` 当作已经清洗过的 HTML 直接插入页面。
+
 ---
 
 ### 5.3 上传并导入文档
