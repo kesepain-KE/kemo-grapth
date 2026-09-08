@@ -2,7 +2,7 @@
 
 > **用途**：本文件定义 kemo-graph 对外提供给 kemo-agent、其他智能体或自动化程序的 HTTP API。
 > **不包括**：Web 前端页面、React 路由、浏览器交互约定。
-> **当前版本**：`1.3.0`
+> **当前版本**：`1.3.1`
 > **实现来源**：`api/__init__.py`、`api/routes.py`、`api/schemas.py`。
 
 ---
@@ -79,6 +79,7 @@ http://127.0.0.1:8000/api/v1
 | 400 / 422 | `INVALID_PARAM` | 参数、请求体或业务前置条件非法 | 修正参数后再试 |
 | 404 | `NOT_FOUND` | source_id、node_id 或路由不存在 | 先刷新状态/图谱确认 ID |
 | 409 | `PROCESSING` | 知识库正在整理 | 等待后重试，不并发修改 |
+| 409 | `IMPORT_SOURCE_CHANGED` | 源文件与调用方确认的 SHA-256 不一致，或捕获期间发生变化 | 重新扫描文件后再发起导入 |
 | 413 | `FILE_TOO_LARGE` | 导入文件超过 50 MB | 拆分或压缩内容 |
 | 415 | `UNSUPPORTED_FORMAT` | 不支持的文档扩展名 | 先转换为支持格式 |
 | 422 | `CONVERSION_FAILED` | 文档无法转换为 Markdown | 检查文件是否损坏或加密 |
@@ -1286,11 +1287,12 @@ POST /api/v1/stores/import-path
 {
   "store_root": "<configured-user-knowledge-root>",
   "path": "<absolute-source-file-from-host-config>",
-  "ingest_after_import": false
+  "ingest_after_import": false,
+  "expected_origin_hash": "<optional-64-char-source-sha256>"
 }
 ```
 
-`path` 必须为绝对普通文件路径。返回同时包含原文件 `origin_hash` 与规范 Markdown `content_hash`，二者不得混用。
+`path` 必须为绝对普通文件路径。`expected_origin_hash` 可省略；可靠调用方应传入自己刚扫描得到的原文件 SHA-256。服务端会先把源文件捕获为私有临时快照，确认快照哈希匹配后再转换；哈希不一致或捕获期间文件变化时返回 HTTP 409 / `IMPORT_SOURCE_CHANGED`，不会注册该文档。返回同时包含原文件 `origin_hash` 与规范 Markdown `content_hash`，二者不得混用。
 
 ### 11.6 multipart 文件上传导入
 

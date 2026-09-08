@@ -18,7 +18,7 @@
 </p>
 
 <p align="center">
-  <a href="version.json"><img src="https://img.shields.io/badge/version-1.3.0-00a98f" alt="version 1.3.0"></a>
+  <a href="version.json"><img src="https://img.shields.io/badge/version-1.3.1-00a98f" alt="version 1.3.1"></a>
   <a href="https://github.com/kesepain-KE/kemo-graph"><img src="https://img.shields.io/badge/status-early%20development-5966d9" alt="status"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-green.svg" alt="license"></a>
   <a href="api.md"><img src="https://img.shields.io/badge/API-agent%20integration-0ea5e9" alt="API"></a>
@@ -191,7 +191,7 @@ An agent that truly accompanies a long-lived project should not only have a long
 
 The core loop is already runnable: unified import, incremental updates, graph and vector retrieval, hybrid Q&A, safe deletion, scheduled maintenance, plus three entry points (Web, CLI, HTTP API) and an external knowledge-service interface for agents such as kemo-agent.
 
-The current release is **1.3.0**. It makes coarse graph extraction the default, adds per-profile entity/relation budgets and sparse relation filtering, improves retrieval with query expansion, exact-term fallback and a new cache format, and splits the knowledge-base entry points into document, graph, retrieval and maintenance services behind a compatible facade. The Web, CLI and HTTP API update paths now also support same-version forced reinstall with failure rollback protection. See [CHANGELOG.md](CHANGELOG.md) for the complete release summary.
+The current release is **1.3.1**. It hardens local-file import: `/stores/import-path` may receive a caller-confirmed SHA-256, and the service creates one private snapshot from an already-open file handle for hashing, conversion, and post-conversion verification. A source that changes during import returns `409 IMPORT_SOURCE_CHANGED` without committing mismatched Markdown or source mappings. Concurrent imports use unique temporary files, failures restore Markdown and the file map, and Big5, GB18030, Shift-JIS, CP1250, and CP1252 text detection is more reliable. The original absolute path remains the source identity, so repeated imports do not needlessly replace the `source_id`.
 
 Still being polished: conversion quality for complex document layouts, storage and index strategy for large knowledge bases and high concurrency, built-in authentication and permission tiers for the external API, and richer manual graph correction and provenance review interfaces.
 

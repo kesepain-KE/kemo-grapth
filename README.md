@@ -18,7 +18,7 @@
 </p>
 
 <p align="center">
-  <a href="version.json"><img src="https://img.shields.io/badge/version-1.3.0-00a98f" alt="version 1.3.0"></a>
+  <a href="version.json"><img src="https://img.shields.io/badge/version-1.3.1-00a98f" alt="version 1.3.1"></a>
   <a href="https://github.com/kesepain-KE/kemo-graph"><img src="https://img.shields.io/badge/status-early%20development-5966d9" alt="status"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-green.svg" alt="license"></a>
   <a href="api.md"><img src="https://img.shields.io/badge/API-agent%20integration-0ea5e9" alt="API"></a>
@@ -191,7 +191,7 @@ kemo-graph 不试图成为替代所有文件管理、所有数据库或所有搜
 
 核心闭环已经可以实际运行：统一导入、增量更新、图谱与向量检索、混合问答、安全删除、定时维护，以及本地 Web、CLI、HTTP API 三个入口和面向 kemo-agent 等智能体的外部知识服务接口。
 
-当前版本为 **1.3.0**。本版本将图谱抽取默认调整为粗粒度并加入按档位的实体/关系硬预算与稀疏关系过滤；检索链路增加查询扩展、精确词面兜底和缓存格式升级；同时按文档、图谱、检索、维护领域拆分知识库服务，并补齐 Web、CLI、HTTP API 的同版本强制更新链路与失败回滚保护。完整变更见 [CHANGELOG.md](CHANGELOG.md)。
+当前版本为 **1.3.1**。本版本加固本地文件导入：`/stores/import-path` 可以接收调用方确认的 SHA-256，服务端从同一个已打开文件句柄生成私有快照，并用该快照完成哈希、转换和转换后复核。源文件在导入期间变化时返回 `409 IMPORT_SOURCE_CHANGED`，不会提交不一致的 Markdown 或来源映射。并发导入使用独立临时文件，失败时恢复 Markdown 和 file map；Big5、GB18030、Shift-JIS、CP1250 与 CP1252 文本的识别也更稳定。原绝对路径仍是来源身份，因此重复导入不会无故更换 `source_id`。
 
 仍在持续打磨：复杂文档版式的转换质量、大知识库与高并发下的存储与索引策略、外部 API 的内建鉴权与权限分层、更丰富的图谱人工校正与来源审查界面。
 
