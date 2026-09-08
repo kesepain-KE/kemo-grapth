@@ -221,6 +221,11 @@ class StoreInitializeRequest(StoreRootRequest):
 class StoreImportPathRequest(StoreRootRequest):
     path: str = Field(min_length=1)
     ingest_after_import: bool = True
+    expected_origin_hash: str | None = Field(
+        default=None,
+        min_length=64,
+        max_length=64,
+    )
 
     @field_validator("path")
     @classmethod
@@ -228,6 +233,16 @@ class StoreImportPathRequest(StoreRootRequest):
         normalized = value.strip()
         if not normalized:
             raise ValueError("path 不能为空")
+        return normalized
+
+    @field_validator("expected_origin_hash")
+    @classmethod
+    def validate_expected_origin_hash(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip().casefold()
+        if any(character not in "0123456789abcdef" for character in normalized):
+            raise ValueError("expected_origin_hash 必须是 SHA-256 十六进制字符串")
         return normalized
 
 

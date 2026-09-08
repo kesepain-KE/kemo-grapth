@@ -22,6 +22,7 @@ from core.ingestor import (
 from core.knowledge_base import (
     DocumentImportError,
     DocumentContentConflictError,
+    DocumentImportConflictError,
     DocumentImportPathError,
     DocumentIngestError,
     DocumentTooLargeError,
@@ -160,6 +161,12 @@ async def _application_error_handler(request: Request, exc: Exception) -> JSONRe
         return JSONResponse(
             status_code=409,
             content=error_payload("CONTENT_CONFLICT", str(exc)),
+        )
+    if isinstance(exc, DocumentImportConflictError):
+        _log_api_error(request, 409, "IMPORT_SOURCE_CHANGED", exc)
+        return JSONResponse(
+            status_code=409,
+            content=error_payload("IMPORT_SOURCE_CHANGED", str(exc)),
         )
     if isinstance(exc, PortableStoreAccessError):
         _log_api_error(request, 403, "STORE_ACCESS_DENIED", exc)
