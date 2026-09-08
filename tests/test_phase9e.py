@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import hashlib
 import io
 import json
+import os
 import tempfile
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
@@ -16,7 +19,10 @@ import start
 from api import create_app
 from api.deps import get_service
 from core.config import AppConfig, load_config
+from core.ingestor import IngestError
 from core.knowledge_base import (
+    DocumentImportConflictError,
+    DocumentImportError,
     DocumentImportPathError,
     KnowledgeBaseService,
     UnsupportedDocumentFormatError,
@@ -112,8 +118,257 @@ class DocumentImportTests(unittest.TestCase):
                 repeated["markdown_relative_path"],
                 results[0]["markdown_relative_path"],
             )
+            self.assertEqual(repeated["source_id"], results[0]["source_id"])
             mapping = json.loads((markdown_dir / "file_map.json").read_text(encoding="utf-8"))
             self.assertEqual(len(mapping["mappings"]), 4)
+
+    def test_import_converts_the_same_private_snapshot_that_was_hashed(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            root = Path(temporary_dir)
+            source = root / "中文 文档.txt"
+            original = b"captured content"
+            source.write_bytes(original)
+            expected_hash = hashlib.sha256(original).hexdigest()
+            service = _service(root)
+            captured_snapshot: Path | None = None
+
+            def replace_source_during_conversion(
+                snapshot_path,
+                external_dir,
+                *,
+                destination_name,
+            ):
+                nonlocal captured_snapshot
+                captured_snapshot = Path(snapshot_path)
+                source.write_text("replacement content", encoding="utf-8")
+                destination = Path(external_dir) / destination_name
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                destination.write_bytes(captured_snapshot.read_bytes())
+                return {"format": "txt"}
+
+            with patch(
+                "core.knowledge_base.convert_document",
+                side_effect=replace_source_during_conversion,
+            ):
+                imported = service.import_document(
+                    source,
+                    ingest_after_import=False,
+                    expected_origin_hash=expected_hash,
+                )
+
+            self.assertEqual(imported["origin_hash"], expected_hash)
+            destination = root / "external" / "markdown" / imported["markdown_relative_path"]
+            self.assertEqual(destination.read_bytes(), original)
+            self.assertEqual(source.read_text(encoding="utf-8"), "replacement content")
+            self.assertIsNotNone(captured_snapshot)
+            assert captured_snapshot is not None
+            self.assertFalse(captured_snapshot.exists())
+            self.assertFalse(captured_snapshot.parent.exists())
+            mapping = json.loads(
+                (root / "external" / "markdown" / "file_map.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(mapping["mappings"][0]["original_path"], str(source.resolve()))
+
+    def test_subjectless_eml_keeps_original_filename_as_fallback_title(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            root = Path(temporary_dir)
+            source = root / "quarterly-report.eml"
+            source.write_bytes(
+                b"From: sender@example.com\r\n"
+                b"To: receiver@example.com\r\n"
+                b"Content-Type: text/plain; charset=utf-8\r\n"
+                b"\r\nQuarterly report body.\r\n"
+            )
+            service = _service(root)
+
+            imported = service.import_document(
+                source,
+                ingest_after_import=False,
+            )
+
+            markdown = (
+                root
+                / "external"
+                / "markdown"
+                / imported["markdown_relative_path"]
+            ).read_text(encoding="utf-8")
+            self.assertIn("# quarterly report", markdown)
+            self.assertNotIn("# source", markdown)
+
+    def test_expected_hash_conflict_has_no_document_side_effects(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            root = Path(temporary_dir)
+            source = root / "document.txt"
+            source.write_text("current content", encoding="utf-8")
+            service = _service(root)
+
+            with patch("core.knowledge_base.convert_document") as convert_mock:
+                with self.assertRaises(DocumentImportConflictError):
+                    service.import_document(
+                        source,
+                        ingest_after_import=False,
+                        expected_origin_hash="0" * 64,
+                    )
+
+            convert_mock.assert_not_called()
+            markdown_dir = root / "external" / "markdown"
+            self.assertEqual(list(markdown_dir.glob("*.md")), [])
+            mapping = json.loads(
+                (markdown_dir / "file_map.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(mapping["mappings"], [])
+
+    def test_source_change_during_capture_is_rejected_before_conversion(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            root = Path(temporary_dir)
+            source = root / "document.txt"
+            source.write_text("original", encoding="utf-8")
+            service = _service(root)
+            real_fstat = os.fstat
+            fstat_calls = 0
+
+            def change_source_before_second_fstat(descriptor):
+                nonlocal fstat_calls
+                fstat_calls += 1
+                if fstat_calls == 2:
+                    source.write_text("changed while capturing", encoding="utf-8")
+                return real_fstat(descriptor)
+
+            with (
+                patch(
+                    "core.knowledge_base.os.fstat",
+                    side_effect=change_source_before_second_fstat,
+                ),
+                patch("core.knowledge_base.convert_document") as convert_mock,
+            ):
+                with self.assertRaises(DocumentImportConflictError):
+                    service.import_document(source, ingest_after_import=False)
+
+            convert_mock.assert_not_called()
+            markdown_dir = root / "external" / "markdown"
+            self.assertEqual(list(markdown_dir.glob("*.md")), [])
+
+    def test_scan_failure_rolls_back_markdown_and_file_map(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            root = Path(temporary_dir)
+            source = root / "document.txt"
+            source.write_text("content", encoding="utf-8")
+            service = _service(root)
+
+            with patch(
+                "core.knowledge_base.Ingestor.scan_sources",
+                side_effect=IngestError("scan failed"),
+            ):
+                with self.assertRaises(DocumentImportError):
+                    service.import_document(source, ingest_after_import=False)
+
+            markdown_dir = root / "external" / "markdown"
+            self.assertEqual(list(markdown_dir.glob("*.md")), [])
+            mapping = json.loads(
+                (markdown_dir / "file_map.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(mapping["mappings"], [])
+
+    def test_parallel_first_imports_do_not_lose_file_map_entries(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            root = Path(temporary_dir)
+            sources = []
+            for index in range(6):
+                source = root / f"document-{index}.txt"
+                source.write_text(f"content {index}", encoding="utf-8")
+                sources.append(source)
+            service = _service(root)
+
+            with ThreadPoolExecutor(max_workers=len(sources)) as executor:
+                results = list(
+                    executor.map(
+                        lambda path: service.import_document(
+                            path,
+                            ingest_after_import=False,
+                        ),
+                        sources,
+                    )
+                )
+
+            self.assertEqual(len({item["source_id"] for item in results}), len(sources))
+            mapping = json.loads(
+                (
+                    root / "external" / "markdown" / "file_map.json"
+                ).read_text(encoding="utf-8")
+            )
+            self.assertEqual(len(mapping["mappings"]), len(sources))
+
+    def test_parallel_imports_of_same_source_keep_one_stable_identity(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            root = Path(temporary_dir)
+            source = root / "shared.txt"
+            source.write_text("shared content", encoding="utf-8")
+            service = _service(root)
+
+            with ThreadPoolExecutor(max_workers=6) as executor:
+                results = list(
+                    executor.map(
+                        lambda _: service.import_document(
+                            source,
+                            ingest_after_import=False,
+                        ),
+                        range(6),
+                    )
+                )
+
+            self.assertEqual(len({item["source_id"] for item in results}), 1)
+            self.assertEqual(
+                len({item["markdown_relative_path"] for item in results}),
+                1,
+            )
+            mapping = json.loads(
+                (
+                    root / "external" / "markdown" / "file_map.json"
+                ).read_text(encoding="utf-8")
+            )
+            self.assertEqual(len(mapping["mappings"]), 1)
+
+    def test_snapshot_tampering_rolls_back_markdown_and_mapping(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            root = Path(temporary_dir)
+            source = root / "document.txt"
+            source.write_text("captured content", encoding="utf-8")
+            service = _service(root)
+            captured_snapshot: Path | None = None
+
+            def tamper_with_snapshot(snapshot_path, external_dir, *, destination_name):
+                nonlocal captured_snapshot
+                captured_snapshot = Path(snapshot_path)
+                destination = Path(external_dir) / destination_name
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                destination.write_text("converted content", encoding="utf-8")
+                captured_snapshot.write_text("tampered", encoding="utf-8")
+                return {"format": "txt"}
+
+            with patch(
+                "core.knowledge_base.convert_document",
+                side_effect=tamper_with_snapshot,
+            ):
+                with self.assertRaises(DocumentImportConflictError):
+                    service.import_document(source, ingest_after_import=False)
+
+            markdown_dir = root / "external" / "markdown"
+            self.assertEqual(list(markdown_dir.glob("*.md")), [])
+            mapping = json.loads(
+                (markdown_dir / "file_map.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(mapping["mappings"], [])
+            self.assertIsNotNone(captured_snapshot)
+            assert captured_snapshot is not None
+            self.assertFalse(captured_snapshot.exists())
+            self.assertFalse(captured_snapshot.parent.exists())
+            self.assertEqual(
+                list(markdown_dir.glob(".*.tmp"))
+                + list(markdown_dir.glob(".*.restore")),
+                [],
+            )
 
     def test_invalid_inputs_and_conversion_failure_leave_no_markdown(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_dir:

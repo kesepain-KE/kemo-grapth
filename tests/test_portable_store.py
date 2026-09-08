@@ -535,18 +535,38 @@ def test_store_api_is_explicit_and_covers_lifecycle(tmp_path: Path) -> None:
             },
         )
         assert initialized.status_code == 200
+        changed = client.post(
+            "/api/v1/stores/import-path",
+            json={
+                "store_root": str(store_root),
+                "path": str(source),
+                "ingest_after_import": False,
+                "expected_origin_hash": "0" * 64,
+            },
+        )
+        assert changed.status_code == 409
+        assert changed.json()["error"]["code"] == "IMPORT_SOURCE_CHANGED"
+        after_conflict = client.post(
+            "/api/v1/stores/documents/list",
+            json={"store_root": str(store_root), "page": 1, "page_size": 5},
+        )
+        assert after_conflict.status_code == 200
+        assert after_conflict.json()["data"]["result"]["pagination"]["total"] == 0
+
+        expected_origin_hash = hashlib.sha256(source.read_bytes()).hexdigest()
         imported = client.post(
             "/api/v1/stores/import-path",
             json={
                 "store_root": str(store_root),
                 "path": str(source),
                 "ingest_after_import": False,
+                "expected_origin_hash": expected_origin_hash.upper(),
             },
         )
         assert imported.status_code == 200
         imported_data = imported.json()["data"]
         assert imported_data["store"]["scope"] == "knowledge.global"
-        assert imported_data["result"]["origin_hash"]
+        assert imported_data["result"]["origin_hash"] == expected_origin_hash
 
         documents = client.post(
             "/api/v1/stores/documents/list",

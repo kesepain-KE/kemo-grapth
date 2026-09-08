@@ -309,7 +309,7 @@ def test_cli_version_outputs_json(capsys: pytest.CaptureFixture[str]) -> None:
     assert start.main(["version"]) == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["ok"] is True
-    assert payload["data"]["version"] == "1.3.0"
+    assert payload["data"]["version"] == "1.3.1"
 
 
 def test_update_apply_loopback_guard() -> None:

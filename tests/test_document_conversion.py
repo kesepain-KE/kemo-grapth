@@ -34,6 +34,37 @@ class DocumentConversionTests(unittest.TestCase):
                 path.write_bytes(expected.encode(encoding))
                 self.assertIn(expected, convert_txt(path))
 
+    def test_shift_jis_and_windows_code_pages_are_not_misclassified(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            root = Path(temporary_dir)
+            samples = {
+                "japanese.txt": (
+                    "日本語の文章：知識グラフとベクトル検索。",
+                    "shift_jis",
+                ),
+                "halfwidth-japanese.txt": (
+                    "商品名：ﾃｽﾄｶﾒﾗ 型番123",
+                    "shift_jis",
+                ),
+                "halfwidth-only.txt": ("ｶﾀｶﾅ", "shift_jis"),
+                "western.txt": ("Résumé — café déjà vu.", "cp1252"),
+                "central-european.txt": (
+                    "Dobrý den, řeka je dlouhá.",
+                    "cp1250",
+                ),
+            }
+            for filename, (expected, encoding) in samples.items():
+                path = root / filename
+                path.write_bytes(expected.encode(encoding))
+                self.assertIn(expected, convert_txt(path))
+
+    def test_binary_text_input_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            path = Path(temporary_dir) / "binary.txt"
+            path.write_bytes(bytes(range(256)) * 4)
+            with self.assertRaises(DocumentConversionError):
+                convert_txt(path)
+
     def test_csv_detects_chinese_encoding_and_semicolon_dialect(self) -> None:
         with tempfile.TemporaryDirectory() as temporary_dir:
             source = Path(temporary_dir) / "名单.csv"

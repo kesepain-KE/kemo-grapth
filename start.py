@@ -16,6 +16,7 @@ from core.ingestor import DocumentNotFoundError, IngestError, RecycleConflictErr
 from core.knowledge_base import (
     DocumentImportError,
     DocumentImportPathError,
+    DocumentImportConflictError,
     DocumentTooLargeError,
     KnowledgeBaseNotInitializedError,
     KnowledgeBaseProcessingError,
@@ -587,6 +588,8 @@ def _map_error(exc: Exception) -> tuple[str, str, int]:
         return "FILE_TOO_LARGE", str(exc), 2
     if isinstance(exc, DocumentImportPathError):
         return "INVALID_PATH", str(exc), 2
+    if isinstance(exc, DocumentImportConflictError):
+        return "IMPORT_SOURCE_CHANGED", str(exc), 3
     if isinstance(exc, DocumentConversionError):
         return "CONVERSION_FAILED", str(exc), 2
     if isinstance(exc, DocumentImportError):
