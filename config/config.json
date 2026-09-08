@@ -38,7 +38,7 @@
     "request_timeout": 900
   },
   "models": {
-    "llm": "opencode-deepseek-v4-flash",
+    "llm": "deepseek-deepseek-v4-flash",
     "embedding": "siliconflow-Qwen-Qwen3-VL-Embedding-8B",
     "embedding_dimensions": 4096,
     "rerank": "siliconflow-Qwen-Qwen3-VL-Reranker-8B"
