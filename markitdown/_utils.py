@@ -97,7 +97,7 @@ def read_text(path: Path) -> str:
     except UnicodeError:
         pass
 
-    candidates: list[tuple[float, str]] = []
+    candidates: list[tuple[float, int, str, str]] = []
     try:
         from charset_normalizer import from_bytes
 
@@ -105,19 +105,29 @@ def read_text(path: Path) -> str:
         if best is not None and best.encoding:
             guessed = best.encoding.casefold().replace("-", "_")
             if not guessed.startswith(("utf_16", "utf_32")):
-                candidates.append((_decoded_text_penalty(str(best)), str(best)))
+                candidates.append(
+                    (_decoded_text_penalty(str(best)), 0, guessed, str(best))
+                )
     except Exception:
         pass
 
-    for encoding in ("gb18030", "big5", "shift_jis", "cp1252"):
+    for priority, encoding in enumerate(
+        ("gb18030", "big5", "shift_jis", "cp1250", "cp1252"),
+        start=1,
+    ):
         try:
             decoded = data.decode(encoding)
         except UnicodeError:
             continue
-        candidates.append((_decoded_text_penalty(decoded), decoded))
+        candidates.append(
+            (_decoded_text_penalty(decoded), priority, encoding, decoded)
+        )
     if not candidates:
         raise DocumentConversionError(f"无法识别文本编码：{path}")
-    penalty, decoded = min(candidates, key=lambda item: item[0])
+    penalty, _priority, _encoding, decoded = _select_text_candidate(
+        data,
+        candidates,
+    )
     if penalty >= 0.35:
         raise DocumentConversionError(f"文件疑似二进制或编码已损坏：{path}")
     return decoded
@@ -137,7 +147,92 @@ def _decoded_text_penalty(text: str) -> float:
     )
     replacement = text.count("\ufffd")
     mojibake = sum(text.count(marker) for marker in ("锟斤拷", "ï»¿", "Ã", "Â"))
-    return (controls * 5 + replacement * 10 + mojibake * 3) / max(len(text), 1)
+    private_use = sum("\ue000" <= char <= "\uf8ff" for char in text)
+    unassigned = sum(unicodedata.category(char) == "Cn" for char in text)
+    score = (
+        controls * 5
+        + replacement * 10
+        + mojibake * 3
+        + private_use * 4
+        + unassigned * 5
+    )
+    return score / max(len(text), 1)
+
+
+def _select_text_candidate(
+    data: bytes,
+    candidates: list[tuple[float, int, str, str]],
+) -> tuple[float, int, str, str]:
+    """在无 BOM 的兼容编码候选中做稳定、保守的选择。"""
+
+    ordered = sorted(candidates, key=lambda item: (item[0], item[1]))
+    usable = [candidate for candidate in ordered if candidate[0] < 0.35]
+    if not usable:
+        return ordered[0]
+
+    best_penalty = usable[0][0]
+    plausible = [
+        candidate
+        for candidate in usable
+        if candidate[0] <= best_penalty + 0.02
+    ]
+    by_encoding: dict[str, tuple[float, int, str, str]] = {}
+    for candidate in plausible:
+        by_encoding.setdefault(candidate[2], candidate)
+
+    shift_jis = by_encoding.get("shift_jis")
+    if shift_jis is not None and _is_halfwidth_shift_jis_stream(data):
+        return shift_jis
+
+    detected = min(plausible, key=lambda item: item[1])
+    if detected[2] in {"cp932", "shift_jis"}:
+        big5 = by_encoding.get("big5")
+        if big5 is not None and _looks_like_big5_cp932_mojibake(
+            detected[3],
+            big5[3],
+        ):
+            return big5
+        return detected
+
+    if detected[2] in {"cp1250", "cp1252"}:
+        cp1250 = by_encoding.get("cp1250")
+        cp1252 = by_encoding.get("cp1252")
+        if cp1250 is not None and cp1252 is not None:
+            return (
+                cp1250
+                if _contains_central_european_signal(cp1250[3])
+                else cp1252
+            )
+
+    return ordered[0]
+
+
+def _is_halfwidth_shift_jis_stream(data: bytes) -> bool:
+    """识别仅由 ASCII 与 Shift-JIS 半角片假名字节组成的文本。"""
+
+    has_halfwidth = False
+    for value in data:
+        if value <= 0x7F:
+            continue
+        if 0xA1 <= value <= 0xDF:
+            has_halfwidth = True
+            continue
+        return False
+    return has_halfwidth
+
+
+def _looks_like_big5_cp932_mojibake(cp932_text: str, big5_text: str) -> bool:
+    halfwidth = sum("\uff61" <= char <= "\uff9f" for char in cp932_text)
+    cp932_cjk = sum("\u3400" <= char <= "\u9fff" for char in cp932_text)
+    big5_cjk = sum("\u3400" <= char <= "\u9fff" for char in big5_text)
+    return halfwidth >= 8 and halfwidth > cp932_cjk * 2 and big5_cjk >= 4
+
+
+def _contains_central_european_signal(text: str) -> bool:
+    signals = frozenset(
+        "ĄĆČĎĘĚŁŃŇŐŘŚŠŤŮŰŹŻŽąćčďęěłńňőřśšťůűźżž"
+    )
+    return any(character in signals for character in text)
 
 
 def finalize_markdown(markdown: str, source: Path) -> str:

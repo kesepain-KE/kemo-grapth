@@ -7,6 +7,7 @@ import os
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from ..config import AppConfig, load_config
 from ._utils import _path_key, _validated_path
@@ -152,12 +153,17 @@ class FileMapStore:
             "version": FILE_MAP_VERSION,
             "mappings": [asdict(mapping) for mapping in mappings],
         }
-        temporary_path = self.file_path.with_suffix(self.file_path.suffix + ".tmp")
-        temporary_path.write_text(
-            json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
-            encoding="utf-8",
+        temporary_path = self.file_path.with_name(
+            f".{self.file_path.name}.{uuid4().hex}.tmp"
         )
-        os.replace(temporary_path, self.file_path)
+        try:
+            temporary_path.write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            os.replace(temporary_path, self.file_path)
+        finally:
+            temporary_path.unlink(missing_ok=True)
 
 
 __all__ = ["FILE_MAP_VERSION", "FileMapError", "FileMapping", "FileMapStore"]

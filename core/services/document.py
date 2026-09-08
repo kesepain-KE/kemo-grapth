@@ -48,11 +48,13 @@ class DocumentService:
         source_path: Path | str,
         *,
         ingest_after_import: bool = True,
+        expected_origin_hash: str | None = None,
         _original_identity: str | None = None,
     ) -> dict[str, Any]:
         return self.owner._import_document_impl(
             source_path,
             ingest_after_import=ingest_after_import,
+            expected_origin_hash=expected_origin_hash,
             _original_identity=_original_identity,
         )
 
